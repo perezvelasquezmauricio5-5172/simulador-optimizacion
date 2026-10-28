@@ -1,0 +1,36 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import streamlit as st
+
+def f(x, y): return 2*x*y + 2*x - x**2 - 2*y**2
+def gradiente(x, y): return np.array([2*y + 2 - 2*x, 2*x - 4*y])
+H_inv = np.linalg.inv(np.array([[-2, 2], [2, -4]]))
+
+st.title('Simulador: Métodos con Gradiente')
+metodo = st.selectbox('Algoritmo:', ['Ascenso de Máxima Inclinación', 'Método de Newton'])
+x_inicio = st.slider('Inicio X:', -3.0, 4.0, -2.0)
+y_inicio = st.slider('Inicio Y:', -3.0, 3.0, -1.0)
+
+x_grid, y_grid = np.meshgrid(np.linspace(-3, 5, 100), np.linspace(-3, 3, 100))
+fig, ax = plt.subplots(figsize=(7, 5))
+ax.contour(x_grid, y_grid, f(x_grid, y_grid), levels=15, cmap='Blues')
+ax.plot(2, 1, 'r*', markersize=15, label='Máximo Óptimo (2,1)')
+
+camino_x, camino_y, curr_x, curr_y = [x_inicio], [y_inicio], x_inicio, y_inicio
+
+if metodo == 'Ascenso de Máxima Inclinación':
+    for _ in range(30):
+        g = gradiente(curr_x, curr_y)
+        curr_x, curr_y = curr_x + 0.15 * g[0], curr_y + 0.15 * g[1]
+        camino_x.append(curr_x); camino_y.append(curr_y)
+        if np.linalg.norm(g) < 0.01: break
+else:
+    for _ in range(5):
+        paso = -np.dot(H_inv, gradiente(curr_x, curr_y))
+        curr_x, curr_y = curr_x + paso[0], curr_y + paso[1]
+        camino_x.append(curr_x); camino_y.append(curr_y)
+
+ax.plot(camino_x, camino_y, 'ko-', label='Trayectoria')
+ax.plot(x_inicio, y_inicio, 'go', label='Inicio')
+ax.legend()
+st.pyplot(fig)
