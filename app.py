@@ -1,680 +1,453 @@
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import streamlit as st
+from dataclasses import dataclass
+from typing import Callable, Tuple, List, Dict, Any
 
 # ==========================================================
-# LABORATORIO INTERACTIVO DE OPTIMIZACION NUMERICA
-# Capitulo 14.2
-# Gradientes, Hessianos, maxima inclinacion y cuasi-Newton
+# 1. CONFIGURACIÓN GLOBAL DE STREAMLIT & ESTILOS VISUALES
 # ==========================================================
-
 st.set_page_config(
-    page_title="Laboratorio de Optimizacion",
+    page_title="Laboratorio de Optimización Numérica",
     page_icon="📈",
     layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# ---------------- FUNCIONES DE PRUEBA ----------------
+# Estilo oscuro integral con soporte para Matplotlib
+plt.style.use('dark_background')
 
-def f_cuenco(x):
-    a, b = x
-    return (a - 2)**2 + 2*(b - 1)**2
+# ==========================================================
+# 2. MODELO DE DATOS Y POBLACIÓN DE ESCENARIOS
+# ==========================================================
+@dataclass
+class EscenarioTopografico:
+    f: Callable[[np.ndarray], float]
+    g: Callable[[np.ndarray], np.ndarray]
+    h: Callable[[np.ndarray], np.ndarray]
+    limites: Tuple[float, float, float, float]
+    optimo: Tuple[float, float]
+    tipo: str
+    descripcion: str
+    maximizar: bool
 
-def g_cuenco(x):
-    a, b = x
-    return np.array([2*(a - 2), 4*(b - 1)], dtype=float)
-
-def h_cuenco(x):
-    return np.array([[2., 0.], [0., 4.]])
-
-def f_libro(x):
-    a, b = x
-    return 2*a*b + 2*a - a**2 - 2*b**2
-
-def g_libro(x):
-    a, b = x
-    return np.array([2*b + 2 - 2*a, 2*a - 4*b], dtype=float)
-
-def h_libro(x):
-    return np.array([[-2., 2.], [2., -4.]])
-
-def f_elipse(x):
-    a, b = x
-    return a**2 + 10*b**2
-
-def g_elipse(x):
-    a, b = x
-    return np.array([2*a, 20*b], dtype=float)
-
-def h_elipse(x):
-    return np.array([[2., 0.], [0., 20.]])
-
-def f_silla(x):
-    a, b = x
-    return a**2 - b**2
-
-def g_silla(x):
-    a, b = x
-    return np.array([2*a, -2*b], dtype=float)
-
-def h_silla(x):
-    return np.array([[2., 0.], [0., -2.]])
-
-
-ESCENARIOS = {
-    "1. Cuenco convexo": {
-        "f": f_cuenco, "g": g_cuenco, "h": h_cuenco,
-        "limites": (-2., 6., -2., 4.),
-        "optimo": (2., 1.),
-        "tipo": "Minimo global",
-        "descripcion": (
-            "Funcion convexa con minimo global en (2, 1). "
-            "Es el escenario recomendado para comparar algoritmos."
+@st.cache_resource
+def cargar_base_conocimiento() -> Dict[str, EscenarioTopografico]:
+    """Carga y almacena en caché la definición matemática de las superficies."""
+    return {
+        "1. Cuenco convexo": EscenarioTopografico(
+            f=lambda x: (x[0] - 2)**2 + 2*(x[1] - 1)**2,
+            g=lambda x: np.array([2*(x[0] - 2), 4*(x[1] - 1)], dtype=float),
+            h=lambda x: np.array([[2., 0.], [0., 4.]]),
+            limites=(-2., 6., -2., 4.),
+            optimo=(2., 1.),
+            tipo="Mínimo global",
+            descripcion="Función convexa con mínimo global en (2, 1). Ideal para comparar velocidad pura de algoritmos.",
+            maximizar=False
         ),
-        "maximizar": False,
-    },
-    "2. Funcion del libro": {
-        "f": f_libro, "g": g_libro, "h": h_libro,
-        "limites": (-3., 5., -3., 3.),
-        "optimo": (2., 1.),
-        "tipo": "Maximo global",
-        "descripcion": (
-            "La funcion original tiene un maximo en (2, 1). "
-            "Para usar algoritmos de minimizacion, se minimiza su negativo."
+        "2. Función del libro": EscenarioTopografico(
+            f=lambda x: 2*x[0]*x[1] + 2*x[0] - x[0]**2 - 2*x[1]**2,
+            g=lambda x: np.array([2*x[1] + 2 - 2*x[0], 2*x[0] - 4*x[1]], dtype=float),
+            h=lambda x: np.array([[-2., 2.], [2., -4.]]),
+            limites=(-3., 5., -3., 3.),
+            optimo=(2., 1.),
+            tipo="Máximo global",
+            descripcion="La función original del libro tiene un máximo en (2, 1). El motor aplica inversión de gradiente automáticamente.",
+            maximizar=True
         ),
-        "maximizar": True,
-    },
-    "3. Elipse alargada": {
-        "f": f_elipse, "g": g_elipse, "h": h_elipse,
-        "limites": (-4., 4., -2., 2.),
-        "optimo": (0., 0.),
-        "tipo": "Minimo global",
-        "descripcion": (
-            "Las curvaturas son diferentes en x e y. "
-            "Permite estudiar zigzag y sensibilidad al tamano del paso."
+        "3. Elipse alargada (Cresta)": EscenarioTopografico(
+            f=lambda x: x[0]**2 + 10*x[1]**2,
+            g=lambda x: np.array([2*x[0], 20*x[1]], dtype=float),
+            h=lambda x: np.array([[2., 0.], [0., 20.]]),
+            limites=(-4., 4., -2., 2.),
+            optimo=(0., 0.),
+            tipo="Mínimo global",
+            descripcion="Diferencia de curvatura severa entre ejes X e Y. Permite evaluar el patrón de zigzag en primera mano.",
+            maximizar=False
         ),
-        "maximizar": False,
-    },
-    "4. Punto silla": {
-        "f": f_silla, "g": g_silla, "h": h_silla,
-        "limites": (-4., 4., -4., 4.),
-        "optimo": (0., 0.),
-        "tipo": "Punto silla",
-        "descripcion": (
-            "El gradiente se anula en el origen, pero no hay minimo "
-            "ni maximo local: la funcion crece en una direccion y "
-            "disminuye en otra."
-        ),
-        "maximizar": False,
-    },
-}
+        "4. Punto silla": EscenarioTopografico(
+            f=lambda x: x[0]**2 - x[1]**2,
+            g=lambda x: np.array([2*x[0], -2*x[1]], dtype=float),
+            h=lambda x: np.array([[2., 0.], [0., -2.]]),
+            limites=(-4., 4., -4., 4.),
+            optimo=(0., 0.),
+            tipo="Punto silla",
+            descripcion="El gradiente se anula en el origen pero la curvatura es indefinida: la función crece en una dirección y decrece en otra.",
+            maximizar=False
+        )
+    }
 
+# ==========================================================
+# 3. MOTOR MATEMÁTICO & ALGORITMOS DE OPTIMIZACIÓN
+# ==========================================================
+class MotorOptimizacion:
+    
+    @staticmethod
+    def clasificar_hessiano(H: np.ndarray, tol: float = 1e-8) -> Tuple[np.ndarray, str]:
+        valores = np.linalg.eigvalsh(H)
+        if np.all(valores > tol):
+            texto = "Definido positivo: curvatura de mínimo local."
+        elif np.all(valores < -tol):
+            texto = "Definido negativo: curvatura de máximo local."
+        elif np.any(valores > tol) and np.any(valores < -tol):
+            texto = "Indefinido: compatible con un punto silla."
+        else:
+            texto = "Semidefinido o degenerado: se requiere más análisis."
+        return valores, texto
 
-# ---------------- HERRAMIENTAS MATEMATICAS ----------------
+    @staticmethod
+    def busqueda_armijo(f: Callable, x: np.ndarray, p: np.ndarray, g: np.ndarray, alpha_inicial: float = 1.0) -> float:
+        alpha = alpha_inicial
+        c, rho = 1e-4, 0.5
+        fx = f(x)
+        pendiente = float(np.dot(g, p))
 
-def clasificar_hessiano(H, tol=1e-8):
-    valores = np.linalg.eigvalsh(H)
+        if not np.isfinite(pendiente) or pendiente >= 0:
+            return 0.0
 
-    if np.all(valores > tol):
-        texto = "Definido positivo: curvatura de minimo local."
-    elif np.all(valores < -tol):
-        texto = "Definido negativo: curvatura de maximo local."
-    elif np.any(valores > tol) and np.any(valores < -tol):
-        texto = "Indefinido: compatible con un punto silla."
-    else:
-        texto = "Semidefinido o degenerado: se requiere mas analisis."
-
-    return valores, texto
-
-
-def busqueda_armijo(f, x, p, g, alpha_inicial=1.0):
-    """Busca un paso que reduzca f para una direccion de descenso."""
-    alpha = alpha_inicial
-    c = 1e-4
-    rho = 0.5
-    fx = f(x)
-    pendiente = float(np.dot(g, p))
-
-    if not np.isfinite(pendiente) or pendiente >= 0:
+        for _ in range(40):
+            xn = x + alpha * p
+            fn = f(xn)
+            if np.isfinite(fn) and fn <= fx + c * alpha * pendiente:
+                return alpha
+            alpha *= rho
         return 0.0
 
-    for _ in range(40):
-        xn = x + alpha*p
-        fn = f(xn)
+    @classmethod
+    def ejecutar(cls, f: Callable, grad: Callable, hess: Callable, x0: List[float], 
+                 metodo: str, max_iter: int, tol: float, paso_fijo: float = 0.05, 
+                 busqueda: bool = True) -> Tuple[np.ndarray, pd.DataFrame, str, np.ndarray]:
+        
+        x = np.array(x0, dtype=float)
+        puntos = [x.copy()]
+        historial = []
+        estado = "Se alcanzó el límite de iteraciones."
+        
+        B = np.eye(2) # Aproximación inicial del Hessiano inverso para BFGS
+        g_anterior, p_anterior = None, None
 
-        if np.isfinite(fn) and fn <= fx + c*alpha*pendiente:
-            return alpha
+        for k in range(max_iter + 1):
+            fx = float(f(x))
+            g = np.asarray(grad(x), dtype=float)
+            ng = float(np.linalg.norm(g))
 
-        alpha *= rho
+            historial.append({
+                "Iteracion": k,
+                "x": x[0],
+                "y": x[1],
+                "f(x,y)": fx,
+                "Norma gradiente": ng,
+            })
 
-    return 0.0
+            if not np.isfinite(fx) or not np.all(np.isfinite(g)) or not np.all(np.isfinite(x)):
+                estado = "Cálculo no finito: el algoritmo se detuvo."
+                break
 
+            if ng < tol:
+                estado = "Gradiente pequeño: punto crítico aproximado."
+                break
 
-def ejecutar_metodo(
-    f, grad, hess, x0, metodo, max_iter, tol,
-    paso_fijo=0.05, busqueda=True
-):
-    x = np.array(x0, dtype=float)
-    puntos = [x.copy()]
-    historial = []
-    estado = "Se alcanzo el limite de iteraciones."
+            if k == max_iter:
+                break
 
-    # B aproxima la inversa del Hessiano en BFGS.
-    B = np.eye(2)
-    g_anterior = None
-    p_anterior = None
-
-    for k in range(max_iter + 1):
-        fx = float(f(x))
-        g = np.asarray(grad(x), dtype=float)
-        ng = float(np.linalg.norm(g))
-
-        historial.append({
-            "Iteracion": k,
-            "x": x[0],
-            "y": x[1],
-            "f(x,y)": fx,
-            "Norma gradiente": ng,
-        })
-
-        if (
-            not np.isfinite(fx)
-            or not np.all(np.isfinite(g))
-            or not np.all(np.isfinite(x))
-        ):
-            estado = "Calculo no finito: el algoritmo se detuvo."
-            break
-
-        if ng < tol:
-            estado = "Gradiente pequeno: punto critico aproximado."
-            break
-
-        if k == max_iter:
-            break
-
-        # Direccion de busqueda
-        if metodo == "Descenso del gradiente":
-            p = -g
-
-        elif metodo == "Gradiente conjugado":
-            if g_anterior is None:
+            # Cálculo de la dirección de descenso
+            if metodo == "Descenso del gradiente":
                 p = -g
-            else:
-                denominador = float(np.dot(g_anterior, g_anterior))
-
-                if denominador > 1e-20:
-                    beta = max(
-                        0.0,
-                        float(np.dot(g, g - g_anterior))
-                        / denominador
-                    )
-                else:
-                    beta = 0.0
-
-                p = -g + beta*p_anterior
-
-                if float(np.dot(p, g)) >= 0:
+            elif metodo == "Gradiente conjugado":
+                if g_anterior is None:
                     p = -g
-
-        elif metodo == "Newton":
-            H = np.asarray(hess(x), dtype=float)
-
-            try:
-                p = np.linalg.solve(H, -g)
-            except np.linalg.LinAlgError:
-                p = -g
-
-            # Si Newton no produce descenso, usar -gradiente.
-            if (
-                not np.all(np.isfinite(p))
-                or float(np.dot(p, g)) >= 0
-            ):
-                p = -g
-
-        elif metodo == "BFGS (cuasi-Newton)":
-            p = -B @ g
-
-            if (
-                not np.all(np.isfinite(p))
-                or float(np.dot(p, g)) >= 0
-            ):
-                B = np.eye(2)
-                p = -g
-
-        else:
-            p = -g
-
-        # Tamano de paso
-        if busqueda:
-            alpha = busqueda_armijo(f, x, p, g)
-        else:
-            alpha = paso_fijo
-
-        if alpha <= 1e-14:
-            estado = "No se encontro un paso util; posible estancamiento."
-            break
-
-        xn = x + alpha*p
-
-        if not np.all(np.isfinite(xn)) or np.linalg.norm(xn) > 1e8:
-            estado = "El metodo se volvio inestable y se detuvo."
-            break
-
-        gn = np.asarray(grad(xn), dtype=float)
-
-        # Actualizacion de BFGS para aproximar la inversa del Hessiano.
-        if metodo == "BFGS (cuasi-Newton)":
-            s = xn - x
-            y = gn - g
-            ys = float(np.dot(y, s))
-
-            if ys > 1e-12:
-                rho = 1.0 / ys
-                I = np.eye(2)
-                V = I - rho*np.outer(s, y)
-                B = V @ B @ V.T + rho*np.outer(s, s)
+                else:
+                    denominador = float(np.dot(g_anterior, g_anterior))
+                    beta = max(0.0, float(np.dot(g, g - g_anterior)) / denominador) if denominador > 1e-20 else 0.0
+                    p = -g + beta * p_anterior
+                    if float(np.dot(p, g)) >= 0:
+                        p = -g
+            elif metodo == "Newton":
+                H = np.asarray(hess(x), dtype=float)
+                try:
+                    p = np.linalg.solve(H, -g)
+                except np.linalg.LinAlgError:
+                    p = -g
+                if not np.all(np.isfinite(p)) or float(np.dot(p, g)) >= 0:
+                    p = -g
+            elif metodo == "BFGS (cuasi-Newton)":
+                p = -B @ g
+                if not np.all(np.isfinite(p)) or float(np.dot(p, g)) >= 0:
+                    B = np.eye(2)
+                    p = -g
             else:
-                B = np.eye(2)
+                p = -g
 
-        g_anterior = g.copy()
-        p_anterior = p.copy()
-        x = xn
-        puntos.append(x.copy())
+            # Tamaño de paso
+            alpha = cls.busqueda_armijo(f, x, p, g) if busqueda else paso_fijo
 
-    return (
-        np.asarray(puntos),
-        pd.DataFrame(historial),
-        estado,
-        x,
-    )
+            if alpha <= 1e-14:
+                estado = "No se encontró un paso útil; posible estancamiento."
+                break
 
+            xn = x + alpha * p
 
-# ---------------- INTERFAZ ----------------
+            if not np.all(np.isfinite(xn)) or np.linalg.norm(xn) > 1e8:
+                estado = "El método se volvió inestable y se detuvo."
+                break
 
-st.title("Laboratorio interactivo de optimizacion")
-st.subheader(
-    "Capitulo 14.2: gradientes, Hessianos y metodos de optimizacion"
-)
-st.write(
-    "Modifica la funcion y el punto inicial, ejecuta algoritmos y "
-    "observa como cambian sus trayectorias y su convergencia."
-)
+            gn = np.asarray(grad(xn), dtype=float)
 
-with st.sidebar:
-    st.header("Panel de control")
+            if metodo == "BFGS (cuasi-Newton)":
+                s = xn - x
+                y = gn - g
+                ys = float(np.dot(y, s))
+                if ys > 1e-12:
+                    rho = 1.0 / ys
+                    I = np.eye(2)
+                    V = I - rho * np.outer(s, y)
+                    B = V @ B @ V.T + rho * np.outer(s, s)
+                else:
+                    B = np.eye(2)
 
-    nombre_escenario = st.selectbox(
-        "Selecciona una funcion",
-        list(ESCENARIOS.keys())
-    )
-    escenario = ESCENARIOS[nombre_escenario]
+            g_anterior = g.copy()
+            p_anterior = p.copy()
+            x = xn
+            puntos.append(x.copy())
 
-    metodo = st.selectbox(
-        "Metodo numerico",
-        [
-            "Descenso del gradiente",
-            "Gradiente conjugado",
-            "Newton",
-            "BFGS (cuasi-Newton)",
-        ]
-    )
+        return np.asarray(puntos), pd.DataFrame(historial), estado, x
 
-    xmin, xmax, ymin, ymax = escenario["limites"]
+# ==========================================================
+# 4. INTERFAZ DE USUARIO & COMPONENTES DE VISUALIZACIÓN
+# ==========================================================
+def main():
+    st.title("📈 Laboratorio Interactivo de Optimización Multivariable")
+    st.markdown("##### Capítulo 14.2: Gradientes, Hessianos, Máxima Inclinación y Métodos Cuasi-Newton")
 
-    st.markdown("**Punto inicial**")
-    x0 = st.slider(
-        "Coordenada x",
-        float(xmin), float(xmax),
-        float(np.clip(xmin + 0.8, xmin, xmax))
-    )
-    y0 = st.slider(
-        "Coordenada y",
-        float(ymin), float(ymax),
-        float(np.clip(ymin + 0.7, ymin, ymax))
-    )
+    base_escenarios = cargar_base_conocimiento()
 
-    max_iter = st.slider(
-        "Maximo de iteraciones", 5, 200, 60, 5
-    )
-    tol = st.select_slider(
-        "Tolerancia del gradiente",
-        options=[1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7],
-        value=1e-5,
-        format_func=lambda v: f"{v:.0e}"
-    )
+    # --- BARRA LATERAL ---
+    with st.sidebar:
+        st.header("⚙️ Panel de Control")
+        nombre_escenario = st.selectbox("Selecciona una función:", list(base_escenarios.keys()))
+        escenario = base_escenarios[nombre_escenario]
 
-    busqueda = st.toggle(
-        "Busqueda lineal automatica",
-        value=True,
-        help="Busca un paso que reduzca la funcion objetivo."
-    )
-
-    paso_fijo = st.slider(
-        "Paso fijo",
-        0.001, 0.5, 0.05, 0.001,
-        disabled=busqueda
-    )
-
-# Convertir maximizar f en minimizar -f.
-f_original = escenario["f"]
-g_original = escenario["g"]
-h_original = escenario["h"]
-
-if escenario["maximizar"]:
-    f = lambda x: -f_original(x)
-    grad = lambda x: -g_original(x)
-    hess = lambda x: -h_original(x)
-    st.info(
-        "Esta funcion tiene un maximo. Para utilizar los metodos "
-        "de minimizacion, el motor trabaja con -f(x,y)."
-    )
-else:
-    f, grad, hess = f_original, g_original, h_original
-
-st.info(escenario["descripcion"])
-
-puntos, historial, estado, xf = ejecutar_metodo(
-    f, grad, hess,
-    [x0, y0],
-    metodo,
-    max_iter,
-    tol,
-    paso_fijo,
-    busqueda,
-)
-
-tab1, tab2, tab3, tab4 = st.tabs([
-    "Simulador",
-    "Gradiente y Hessiano",
-    "Comparar metodos",
-    "Reto para la clase",
-])
-
-# ---------------- TAB 1: SIMULADOR ----------------
-
-with tab1:
-    col_graf, col_resultados = st.columns([1.7, 1])
-
-    with col_graf:
-        xg, yg = np.meshgrid(
-            np.linspace(xmin, xmax, 120),
-            np.linspace(ymin, ymax, 120)
+        metodo = st.selectbox(
+            "Algoritmo Numérico:",
+            ["Descenso del gradiente", "Gradiente conjugado", "Newton", "BFGS (cuasi-Newton)"]
         )
 
-        zg = np.vectorize(
-            lambda a, b: f(np.array([a, b]))
-        )(xg, yg)
+        xmin, xmax, ymin, ymax = escenario.limites
 
-        fig, ax = plt.subplots(figsize=(9, 6))
-        fig.patch.set_facecolor("#0E1117")
-        ax.set_facecolor("#0E1117")
+        st.markdown("---")
+        st.markdown("**Vector de Posición Inicial (X₀)**")
+        x0 = st.slider("Coordenada X", float(xmin), float(xmax), float(np.clip(xmin + 0.8, xmin, xmax)))
+        y0 = st.slider("Coordenada Y", float(ymin), float(ymax), float(np.clip(ymin + 0.7, ymin, ymax)))
 
-        niveles = np.linspace(np.nanmin(zg), np.nanmax(zg), 25)
-        curvas = ax.contour(
-            xg, yg, zg,
-            levels=niveles,
-            cmap="viridis",
-            linewidths=0.9
-        )
-        ax.clabel(curvas, inline=True, fontsize=7)
-
-        ax.plot(
-            puntos[:, 0], puntos[:, 1],
-            "-o", color="#FFC107",
-            linewidth=2, markersize=4,
-            label="Trayectoria"
-        )
-        ax.scatter(
-            [x0], [y0], s=100,
-            color="#00BCD4", edgecolor="white",
-            label="Inicio", zorder=5
-        )
-        ax.scatter(
-            [xf[0]], [xf[1]], s=120,
-            marker="X", color="#FF5722",
-            edgecolor="white", label="Punto final",
-            zorder=6
+        st.markdown("---")
+        max_iter = st.slider("Máximo de iteraciones", 5, 200, 60, 5)
+        tol = st.select_slider(
+            "Tolerancia del gradiente",
+            options=[1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7],
+            value=1e-5,
+            format_func=lambda v: f"{v:.0e}"
         )
 
-        ax.set_xlabel("x")
-        ax.set_ylabel("y")
-        ax.set_title("Curvas de nivel y recorrido")
-        ax.legend(facecolor="#171A21", labelcolor="white")
-        ax.grid(alpha=0.12)
+        busqueda = st.toggle("Búsqueda lineal automática (Armijo)", value=True)
+        paso_fijo = st.slider("Paso fijo (α)", 0.001, 0.5, 0.05, 0.001, disabled=busqueda)
 
-        st.pyplot(fig, clear_figure=True)
-        plt.close(fig)
+    # Adaptación dinámica si la función original es de maximización
+    f_orig, g_orig, h_orig = escenario.f, escenario.g, escenario.h
+    if escenario.maximizar:
+        f = lambda x: -f_orig(x)
+        grad = lambda x: -g_orig(x)
+        hess = lambda x: -h_orig(x)
+        st.info("💡 **Nota:** Esta función busca un máximo global. El motor optimiza $-f(x,y)$ mediante minimización.")
+    else:
+        f, grad, hess = f_orig, g_orig, h_orig
 
-    with col_resultados:
-        st.subheader("Resultados")
+    st.caption(escenario.descripcion)
 
-        st.metric("Iteraciones", len(historial) - 1)
-        st.metric("x final", f"{xf[0]:.6f}")
-        st.metric("y final", f"{xf[1]:.6f}")
-        st.metric(
-            "Funcion original",
-            f"{f_original(xf):.6f}"
-        )
-        st.metric(
-            "Norma del gradiente",
-            f"{np.linalg.norm(grad(xf)):.3e}"
-        )
-
-        st.write("**Estado:**")
-        st.write(estado)
-
-        valores, clasificacion = clasificar_hessiano(hess(xf))
-        st.write("**Hessiano en el punto final:**")
-        st.write(clasificacion)
-
-        st.caption(
-            "Un gradiente pequeno indica un punto critico aproximado, "
-            "pero no garantiza por si solo un minimo."
-        )
-
-    st.subheader("Tabla de iteraciones")
-
-    st.dataframe(
-        historial.style.format({
-            "x": "{:.6f}",
-            "y": "{:.6f}",
-            "f(x,y)": "{:.8f}",
-            "Norma gradiente": "{:.3e}",
-        }),
-        use_container_width=True,
-        hide_index=True
+    # Cálculo principal
+    puntos, historial, estado, xf = MotorOptimizacion.ejecutar(
+        f, grad, hess, [x0, y0], metodo, max_iter, tol, paso_fijo, busqueda
     )
 
-    st.download_button(
-        "Descargar historial CSV",
-        historial.to_csv(index=False).encode("utf-8"),
-        file_name="historial_optimizacion.csv",
-        mime="text/csv"
-    )
+    # --- PESTAÑAS DE NAVEGACIÓN ---
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "🌌 Simulador Interactivo",
+        "🧮 Análisis de Gradiente y Hessiano",
+        "📊 Comparativa de Algoritmos",
+        "📝 Cuestionario Evaluativo"
+    ])
 
-# ---------------- TAB 2: GRADIENTE Y HESSIANO ----------------
+    # ---------------- TAB 1: SIMULADOR ----------------
+    with tab1:
+        col_graf, col_res = st.columns([1.8, 1])
 
-with tab2:
-    st.subheader("Gradiente: derivadas de primer orden")
+        with col_graf:
+            xg, yg = np.meshgrid(np.linspace(xmin, xmax, 120), np.linspace(ymin, ymax, 120))
+            zg = np.vectorize(lambda a, b: f(np.array([a, b])))(xg, yg)
 
-    g0 = grad(np.array([x0, y0], dtype=float))
-    st.latex(
-        r"\nabla f(x,y)=\begin{bmatrix}"
-        r"\frac{\partial f}{\partial x}\\"
-        r"\frac{\partial f}{\partial y}"
-        r"\end{bmatrix}"
-    )
+            fig, ax = plt.subplots(figsize=(9, 6))
+            fig.patch.set_facecolor("#0E1117")
+            ax.set_facecolor("#0E1117")
 
-    st.write(f"En el punto inicial ({x0:.3f}, {y0:.3f}):")
-    st.code(
-        f"Gradiente = [{g0[0]:.6f}, {g0[1]:.6f}]\n"
-        f"Norma = {np.linalg.norm(g0):.6f}"
-    )
+            niveles = np.linspace(np.nanmin(zg), np.nanmax(zg), 25)
+            curvas = ax.contour(xg, yg, zg, levels=niveles, cmap="viridis", linewidths=0.9, alpha=0.8)
+            ax.clabel(curvas, inline=True, fontsize=7, colors="#A0A0A0")
 
-    st.markdown(
-        "**Interpretacion:**\n"
-        "- El gradiente apunta hacia el crecimiento mas rapido local.\n"
-        "- El negativo del gradiente es la direccion de descenso mas pronunciado.\n"
-        "- La tasa de aprendizaje determina el tamano del paso."
-    )
+            # Dibujo de trayectorias con colores de alto contraste neón
+            ax.plot(puntos[:, 0], puntos[:, 1], "-o", color="#FFC107", linewidth=2.2, markersize=4, label="Ruta del algoritmo")
+            ax.scatter([x0], [y0], s=100, color="#00BCD4", edgecolor="white", label="Punto Inicial X₀", zorder=5)
+            ax.scatter([xf[0]], [xf[1]], s=120, marker="X", color="#FF5722", edgecolor="white", label="Punto Final Alcanzado", zorder=6)
 
-    st.divider()
-    st.subheader("Hessiano: derivadas de segundo orden")
+            ax.set_xlabel("Eje X")
+            ax.set_ylabel("Eje Y")
+            ax.set_title("Superficie Topográfica y Trayectoria Numérica")
+            ax.legend(facecolor="#171A21", labelcolor="white", edgecolor="#333333")
+            ax.grid(alpha=0.15)
 
-    H0 = hess(np.array([x0, y0], dtype=float))
-    st.latex(
-        r"H(x,y)=\begin{bmatrix}"
-        + f"{H0[0,0]:.4f}&{H0[0,1]:.4f}\\\\"
-        + f"{H0[1,0]:.4f}&{H0[1,1]:.4f}"
-        + r"\end{bmatrix}"
-    )
+            st.pyplot(fig, clear_figure=True)
+            plt.close(fig)
 
-    valores, clasificacion = clasificar_hessiano(H0)
-    st.write(f"Autovalores: {valores[0]:.5f}, {valores[1]:.5f}")
-    st.write(clasificacion)
+        with col_res:
+            st.markdown("### Telemetría")
+            st.metric("Iteraciones Computadas", len(historial) - 1)
+            st.metric("Coordenada X Final", f"{xf[0]:.6f}")
+            st.metric("Coordenada Y Final", f"{xf[1]:.6f}")
+            st.metric("Valor f(x,y) Evaluación", f"{f_orig(xf):.6f}")
+            st.metric("Norma Gradiente ||∇f||", f"{np.linalg.norm(g_orig(xf)):.3e}")
 
-    st.caption(
-        "El criterio del Hessiano se utiliza para clasificar un punto "
-        "critico bajo las condiciones matematicas correspondientes."
-    )
+            st.markdown("**Estado del algoritmo:**")
+            st.info(estado)
 
-# ---------------- TAB 3: COMPARACION ----------------
+            _, clasif = MotorOptimizacion.clasificar_hessiano(h_orig(xf))
+            st.markdown("**Matriz Hessiana en el punto final:**")
+            st.caption(clasif)
 
-with tab3:
-    st.subheader("Comparacion con el mismo punto inicial")
-
-    nombres = [
-        "Descenso del gradiente",
-        "Gradiente conjugado",
-        "Newton",
-        "BFGS (cuasi-Newton)",
-    ]
-
-    filas = []
-    historiales = {}
-
-    for nombre in nombres:
-        pts, hist, est, punto_final = ejecutar_metodo(
-            f, grad, hess,
-            [x0, y0],
-            nombre,
-            max_iter,
-            tol,
-            paso_fijo,
-            busqueda,
+        st.markdown("---")
+        st.markdown("### Registros Históricos")
+        st.dataframe(
+            historial.style.format({
+                "x": "{:.6f}",
+                "y": "{:.6f}",
+                "f(x,y)": "{:.8f}",
+                "Norma gradiente": "{:.3e}",
+            }),
+            use_container_width=True,
+            hide_index=True
         )
 
-        historiales[nombre] = hist
-
-        filas.append({
-            "Metodo": nombre,
-            "Iteraciones": len(hist) - 1,
-            "x final": punto_final[0],
-            "y final": punto_final[1],
-            "Valor objetivo": f(punto_final),
-            "Norma gradiente": np.linalg.norm(grad(punto_final)),
-            "Estado": est,
-        })
-
-    comparacion = pd.DataFrame(filas)
-
-    st.dataframe(
-        comparacion.style.format({
-            "x final": "{:.6f}",
-            "y final": "{:.6f}",
-            "Valor objetivo": "{:.8f}",
-            "Norma gradiente": "{:.3e}",
-        }),
-        use_container_width=True,
-        hide_index=True
-    )
-
-    fig2, ax2 = plt.subplots(figsize=(9, 4))
-    fig2.patch.set_facecolor("#0E1117")
-    ax2.set_facecolor("#0E1117")
-
-    for nombre, hist in historiales.items():
-        ax2.semilogy(
-            np.arange(len(hist)),
-            np.maximum(hist["Norma gradiente"].to_numpy(), 1e-16),
-            marker="o",
-            markersize=3,
-            label=nombre
+        st.download_button(
+            "💾 Descargar reporte en CSV",
+            historial.to_csv(index=False).encode("utf-8"),
+            file_name="reporte_optimizacion.csv",
+            mime="text/csv"
         )
 
-    ax2.set_xlabel("Iteracion")
-    ax2.set_ylabel("Norma del gradiente")
-    ax2.set_title("Comparacion de convergencia")
-    ax2.legend(facecolor="#171A21", labelcolor="white")
-    ax2.grid(alpha=0.2)
+    # ---------------- TAB 2: GRADIENTE Y HESSIANO ----------------
+    with tab2:
+        st.markdown("### 1. Vector Gradiente: Derivadas de Primer Orden")
+        g0 = g_orig(np.array([x0, y0], dtype=float))
+        
+        st.latex(r"\nabla f(x,y) = \begin{bmatrix} \frac{\partial f}{\partial x} \\ \frac{\partial f}{\partial y} \end{bmatrix}")
+        st.write(f"Evaluación exacta en el punto de origen **({x0:.3f}, {y0:.3f})**:")
+        st.code(f"∇f = [{g0[0]:.6f}, {g0[1]:.6f}]\n||∇f|| = {np.linalg.norm(g0):.6f}")
 
-    st.pyplot(fig2, clear_figure=True)
-    plt.close(fig2)
+        st.markdown("""
+        * **Crecimiento:** El vector gradiente apunta directamente hacia la dirección donde la función crece más rápidamente.
+        * **Descenso:** El vector opuesto ($-\nabla f$) marca la ruta de máxima inclinación de descenso.
+        * **Ortogonalidad:** Es perpendicular a las curvas de nivel en cada punto.
+        """)
 
-    st.caption(
-        "El mejor metodo depende de la funcion, el punto inicial, "
-        "la curvatura y la estrategia de busqueda lineal."
-    )
+        st.divider()
+        st.markdown("### 2. Matriz Hessiana: Derivadas de Segundo Orden")
+        H0 = h_orig(np.array([x0, y0], dtype=float))
+        
+        st.latex(rf"H(x,y) = \begin{{bmatrix}} {H0[0,0]:.4f} & {H0[0,1]:.4f} \\ {H0[1,0]:.4f} & {H0[1,1]:.4f} \end{bmatrix}")
+        
+        val, clas = MotorOptimizacion.clasificar_hessiano(H0)
+        st.write(f"**Autovalores computados:** $\lambda_1 = {val[0]:.5f}, \lambda_2 = {val[1]:.5f}$")
+        st.success(clas)
 
-# ---------------- TAB 4: RETO ----------------
+    # ---------------- TAB 3: COMPARATIVA ----------------
+    with tab3:
+        st.markdown("### Rendimiento de Algoritmos desde la misma posición X₀")
+        
+        nombres = ["Descenso del gradiente", "Gradiente conjugado", "Newton", "BFGS (cuasi-Newton)"]
+        filas = []
+        historico_comparativo = {}
 
-with tab4:
-    st.subheader("Comprueba lo aprendido")
+        for n in nombres:
+            pts_c, hist_c, est_c, xf_c = MotorOptimizacion.ejecutar(
+                f, grad, hess, [x0, y0], n, max_iter, tol, paso_fijo, busqueda
+            )
+            historico_comparativo[n] = hist_c
+            filas.append({
+                "Método": n,
+                "Iteraciones": len(hist_c) - 1,
+                "X final": xf_c[0],
+                "Y final": xf_c[1],
+                "Valor Objetivo f(x,y)": f_orig(xf_c),
+                "Norma ||∇f||": np.linalg.norm(g_orig(xf_c)),
+                "Diagnóstico": est_c
+            })
 
-    respuesta1 = st.radio(
-        "1. Si el gradiente vale cero, ¿que podemos afirmar?",
-        [
-            "Siempre es un minimo global.",
-            "Es un punto critico, pero hay que clasificarlo.",
-            "La funcion vale necesariamente cero.",
-            "El algoritmo no ha empezado.",
-        ],
-        key="pregunta1"
-    )
+        st.dataframe(
+            pd.DataFrame(filas).style.format({
+                "X final": "{:.6f}",
+                "Y final": "{:.6f}",
+                "Valor Objetivo f(x,y)": "{:.8f}",
+                "Norma ||∇f||": "{:.3e}"
+            }),
+            use_container_width=True,
+            hide_index=True
+        )
 
-    respuesta2 = st.radio(
-        "2. ¿Que informacion proporciona el Hessiano?",
-        [
-            "La curvatura local mediante derivadas segundas.",
-            "Solamente el punto inicial.",
-            "Siempre garantiza convergencia.",
-            "Solamente el numero de variables.",
-        ],
-        key="pregunta2"
-    )
+        # Gráfica de Convergencia
+        fig2, ax2 = plt.subplots(figsize=(9, 4))
+        fig2.patch.set_facecolor("#0E1117")
+        ax2.set_facecolor("#0E1117")
 
-    respuesta3 = st.radio(
-        "3. ¿Que caracteriza a BFGS?",
-        [
-            "Actualiza una aproximacion de la inversa del Hessiano.",
-            "Utiliza exclusivamente el valor de la funcion.",
-            "No utiliza gradientes.",
-            "Siempre encuentra el optimo global de cualquier funcion.",
-        ],
-        key="pregunta3"
-    )
+        for n, h_comp in historico_comparativo.items():
+            ax2.semilogy(
+                np.arange(len(h_comp)),
+                np.maximum(h_comp["Norma gradiente"].to_numpy(), 1e-16),
+                marker="o", markersize=3, label=n
+            )
 
-    if st.button("Comprobar respuestas"):
-        if respuesta1.startswith("Es un punto"):
-            st.success("1. Correcto: puede ser minimo, maximo o punto silla.")
-        else:
-            st.error("1. Recuerda: gradiente cero no implica minimo global.")
+        ax2.set_xlabel("Iteraciones")
+        ax2.set_ylabel("Norma del Gradiente ||∇f|| (Escala Logarítmica)")
+        ax2.set_title("Curva de Velocidad de Convergencia")
+        ax2.legend(facecolor="#171A21", labelcolor="white", edgecolor="#333333")
+        ax2.grid(alpha=0.2)
 
-        if respuesta2.startswith("La curvatura"):
-            st.success("2. Correcto: el Hessiano contiene derivadas segundas.")
-        else:
-            st.error("2. Repasa la interpretacion de la matriz Hessiana.")
+        st.pyplot(fig2, clear_figure=True)
+        plt.close(fig2)
 
-        if respuesta3.startswith("Actualiza"):
-            st.success("3. Correcto: BFGS es un metodo cuasi-Newton.")
-        else:
-            st.error("3. BFGS aproxima la informacion de curvatura.")
+    # ---------------- TAB 4: CUESTIONARIO ----------------
+    with tab4:
+        st.markdown("### Comprueba lo aprendido en la presentación")
 
-st.divider()
-st.caption(
-    "Laboratorio didactico. Los resultados numericos deben interpretarse "
-    "considerando las hipotesis y limitaciones de cada algoritmo."
-)
+        r1 = st.radio(
+            "1. Si el gradiente vale exactamente cero (∇f = 0), ¿qué podemos afirmar?",
+            ["Siempre es un mínimo global.", "Es un punto crítico, pero se requiere evaluar el Hessiano para clasificarlo.", "La función vale cero en ese punto.", "El algoritmo no ha comenzado."],
+            key="p1"
+        )
 
+        r2 = st.radio(
+            "2. ¿Qué información proporciona la Matriz Hessiana?",
+            ["La curvatura local de la función mediante derivadas de segundo orden.", "Solamente el punto de partida.", "Asegura siempre convergencia en 1 paso.", "Solamente el número de variables."],
+            key="p2"
+        )
+
+        r3 = st.radio(
+            "3. ¿Cuál es la característica principal del método BFGS?",
+            ["Construye y actualiza iterativamente una aproximación de la inversa de la matriz Hessiana.", "Únicamente evalúa la función sin usar derivadas.", "No requiere calcular gradientes.", "Siempre encuentra el óptimo global en cualquier función."],
+            key="p3"
+        )
+
+        if st.button("Comprobar respuestas"):
+            st.success("1. Correcto: Es un punto crítico (puede ser mínimo, máximo o punto silla).") if r1.startswith("Es un punto") else st.error("1. Incorrecto. Revisa el concepto de punto crítico.")
+            st.success("2. Correcto: La matriz Hessiana contiene las derivadas de segundo orden y mide la curvatura.") if r2.startswith("La curvatura") else st.error("2. Incorrecto. Repasa las derivadas parciales de segundo orden.")
+            st.success("3. Correcto: BFGS aproxima B ≈ H⁻¹ utilizando solo información de gradientes de pasos previos.") if r3.startswith("Construye") else st.error("3. Incorrecto. Revisa la definición de métodos Cuasi-Newton.")
+
+if __name__ == "__main__":
+    main()
