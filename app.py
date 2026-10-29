@@ -2,16 +2,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 import streamlit as st
 
-# Definir función y derivadas
+# Activar el estilo oscuro para que coincida con el video
+plt.style.use('dark_background')
+
 def f(x, y): return 2*x*y + 2*x - x**2 - 2*y**2
 def gradiente(x, y): return np.array([2*y + 2 - 2*x, 2*x - 4*y])
 H_inv = np.linalg.inv(np.array([[-2, 2], [2, -4]]))
 
-st.set_page_config(layout="wide") # Hace la app más ancha
+st.set_page_config(layout="wide")
 st.title('Simulador: Métodos con Gradiente')
 st.markdown("Encuentra el punto máximo de la función $f(x,y) = 2xy + 2x - x^2 - 2y^2$")
 
-# Crear dos columnas para el diseño
 col_controles, col_grafica = st.columns([1, 2])
 
 with col_controles:
@@ -27,7 +28,6 @@ with col_controles:
         alpha = None
         max_iter = st.slider('Límite de pasos:', 1, 10, 5)
 
-# Lógica del algoritmo
 camino_x, camino_y = [x_inicio], [y_inicio]
 curr_x, curr_y = x_inicio, y_inicio
 
@@ -37,8 +37,7 @@ if metodo == 'Ascenso de Máxima Inclinación':
         curr_x, curr_y = curr_x + alpha * g[0], curr_y + alpha * g[1]
         camino_x.append(curr_x)
         camino_y.append(curr_y)
-        if np.linalg.norm(g) < 0.01: 
-            break
+        if np.linalg.norm(g) < 0.01: break
 else:
     for _ in range(max_iter):
         g = gradiente(curr_x, curr_y)
@@ -46,28 +45,28 @@ else:
         curr_x, curr_y = curr_x + paso[0], curr_y + paso[1]
         camino_x.append(curr_x)
         camino_y.append(curr_y)
-        if np.linalg.norm(g) < 0.01: 
-            break
+        if np.linalg.norm(g) < 0.01: break
 
 with col_grafica:
-    # Generar la gráfica
     x_grid, y_grid = np.meshgrid(np.linspace(-3, 5, 100), np.linspace(-3, 3, 100))
     fig, ax = plt.subplots(figsize=(8, 6))
-    contour = ax.contour(x_grid, y_grid, f(x_grid, y_grid), levels=15, cmap='Blues')
-    ax.clabel(contour, inline=True, fontsize=8)
     
-    # Dibujar el punto óptimo y la trayectoria
-    ax.plot(2, 1, 'r*', markersize=18, label='Máximo Óptimo (2,1)')
-    ax.plot(camino_x, camino_y, 'ko-', linewidth=2, label='Trayectoria del algoritmo')
-    ax.plot(x_inicio, y_inicio, 'go', markersize=10, label='Punto de Inicio')
+    # Ajustar colores del fondo para que coincida con el video
+    fig.patch.set_facecolor('#0E1117')
+    ax.set_facecolor('#0E1117')
     
-    ax.legend(loc="upper left")
+    # Mapa de colores 'viridis' para imitar los tonos del video
+    contour = ax.contour(x_grid, y_grid, f(x_grid, y_grid), levels=15, cmap='viridis')
+    ax.clabel(contour, inline=True, fontsize=8, colors='white')
+    
+    # Colores neón idénticos a los de la presentación
+    ax.plot(2, 1, color='#FF5722', marker='*', markersize=18, label='Máximo Óptimo (2,1)')
+    ax.plot(camino_x, camino_y, color='#FFC107', marker='o', linestyle='-', linewidth=2, markersize=6, label='Trayectoria')
+    ax.plot(x_inicio, y_inicio, color='#00BCD4', marker='o', markersize=10, label='Punto de Inicio')
+    
+    ax.legend(loc="upper left", facecolor='#0E1117', edgecolor='white')
     st.pyplot(fig)
     
-    # Mostrar resultados finales abajo de la gráfica
     col_res1, col_res2 = st.columns(2)
     col_res1.metric(label="Pasos realizados", value=len(camino_x)-1)
     col_res2.metric(label="Coordenada final alcanzada", value=f"({curr_x:.2f}, {curr_y:.2f})")
-ax.plot(x_inicio, y_inicio, 'go', label='Inicio')
-ax.legend()
-st.pyplot(fig)
