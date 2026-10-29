@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Callable, Tuple, List, Dict, Any
 
 # ==========================================================
-# 1. CONFIGURACIÓN GLOBAL DE STREAMLIT & ESTILOS VISUALES
+# 1. CONFIGURACIÓN GLOBAL DE STREAMLIT Y ESTILOS VISUALES
 # ==========================================================
 st.set_page_config(
     page_title="Laboratorio de Optimización Numérica",
@@ -19,7 +19,7 @@ st.set_page_config(
 plt.style.use('dark_background')
 
 # ==========================================================
-# 2. MODELO DE DATOS Y POBLACIÓN DE ESCENARIOS
+# 2. MODELO DE DATOS Y BASE DE CONOCIMIENTO
 # ==========================================================
 @dataclass
 class EscenarioTopografico:
@@ -79,7 +79,7 @@ def cargar_base_conocimiento() -> Dict[str, EscenarioTopografico]:
     }
 
 # ==========================================================
-# 3. MOTOR MATEMÁTICO & ALGORITMOS DE OPTIMIZACIÓN
+# 3. MOTOR MATEMÁTICO Y ALGORITMOS DE OPTIMIZACIÓN
 # ==========================================================
 class MotorOptimizacion:
     
@@ -151,7 +151,7 @@ class MotorOptimizacion:
             if k == max_iter:
                 break
 
-            # Cálculo de la dirección de descenso
+            # Dirección de búsqueda
             if metodo == "Descenso del gradiente":
                 p = -g
             elif metodo == "Gradiente conjugado":
@@ -214,7 +214,7 @@ class MotorOptimizacion:
         return np.asarray(puntos), pd.DataFrame(historial), estado, x
 
 # ==========================================================
-# 4. INTERFAZ DE USUARIO & COMPONENTES DE VISUALIZACIÓN
+# 4. INTERFAZ DE USUARIO Y RENDERIZADO DE PESTAÑAS
 # ==========================================================
 def main():
     st.title("📈 Laboratorio Interactivo de Optimización Multivariable")
@@ -293,7 +293,7 @@ def main():
             curvas = ax.contour(xg, yg, zg, levels=niveles, cmap="viridis", linewidths=0.9, alpha=0.8)
             ax.clabel(curvas, inline=True, fontsize=7, colors="#A0A0A0")
 
-            # Dibujo de trayectorias con colores de alto contraste neón
+            # Dibujo de trayectorias
             ax.plot(puntos[:, 0], puntos[:, 1], "-o", color="#FFC107", linewidth=2.2, markersize=4, label="Ruta del algoritmo")
             ax.scatter([x0], [y0], s=100, color="#00BCD4", edgecolor="white", label="Punto Inicial X₀", zorder=5)
             ax.scatter([xf[0]], [xf[1]], s=120, marker="X", color="#FF5722", edgecolor="white", label="Punto Final Alcanzado", zorder=6)
@@ -353,7 +353,7 @@ def main():
 
         st.markdown("""
         * **Crecimiento:** El vector gradiente apunta directamente hacia la dirección donde la función crece más rápidamente.
-        * **Descenso:** El vector opuesto ($-\nabla f$) marca la ruta de máxima inclinación de descenso.
+        * **Descenso:** El vector opuesto ($-\\nabla f$) marca la ruta de máxima inclinación de descenso.
         * **Ortogonalidad:** Es perpendicular a las curvas de nivel en cada punto.
         """)
 
@@ -361,10 +361,15 @@ def main():
         st.markdown("### 2. Matriz Hessiana: Derivadas de Segundo Orden")
         H0 = h_orig(np.array([x0, y0], dtype=float))
         
-        st.latex(rf"H(x,y) = \begin{{bmatrix}} {H0[0,0]:.4f} & {H0[0,1]:.4f} \\ {H0[1,0]:.4f} & {H0[1,1]:.4f} \end{bmatrix}")
+        st.latex(
+            r"H(x,y) = \begin{bmatrix} "
+            + f"{H0[0,0]:.4f} & {H0[0,1]:.4f} \\\\ "
+            + f"{H0[1,0]:.4f} & {H0[1,1]:.4f}"
+            + r" \end{bmatrix}"
+        )
         
         val, clas = MotorOptimizacion.clasificar_hessiano(H0)
-        st.write(f"**Autovalores computados:** $\lambda_1 = {val[0]:.5f}, \lambda_2 = {val[1]:.5f}$")
+        st.write(f"**Autovalores computados:** $\\lambda_1 = {val[0]:.5f}, \\lambda_2 = {val[1]:.5f}$")
         st.success(clas)
 
     # ---------------- TAB 3: COMPARATIVA ----------------
